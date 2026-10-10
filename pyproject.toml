@@ -8,6 +8,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "langchain>=1.4.4",
+    "langchain-openai>=1.7.0",
     "mcp[cli]>=2.3.0",
     "openai>=3.28.0",
     "python-dotenv>=1.2.4",
