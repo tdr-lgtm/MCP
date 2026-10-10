@@ -1,93 +1,177 @@
-Example first: a restaurant.
+# MCP From Scratch
 
-The kitchen has the food and cooks it.
+A small learning project about **MCP (Model Context Protocol)**.
 
-The customer doesn’t cook. They ask for what they want.
+MCP is a standard way for an AI app to use tools. One program (the **server**) has the tools. Another program (the **client**, usually your AI agent) asks the server what tools it has and then asks it to run them.
 
-In MCP:
+This repo builds MCP step by step: first by hand with plain Python, then with the official library, then over HTTP, and finally with real AI agents that use the tools.
 
-Server = the kitchen. It has the tools and runs them.
+## The idea in one picture
 
-Client = the customer. It’s your agent or app. It asks the server for tools.
+Think of a restaurant:
 
- CLIENT (your agent)                SERVER (has get_weather)
-       │  "What tools do you have?"      │
-       │ ──────────────────────────────▶ │
-       │  "I have get_weather"           │
-       │ ◀────────────────────────────── │
-       │  "Run get_weather for Delhi"    │
-       │ ──────────────────────────────▶ │
-       │  "38°C, sunny"                  │
-       │ ◀────────────────────────────── │
+- **Server = the kitchen.** It has the tools and runs them. It has no AI inside.
+- **Client = the customer.** It is your agent or app. The AI (LLM) lives here.
 
+```
+ CLIENT (your agent)                 SERVER (has get_weather)
+       │  "Hello, can we talk?"           │   initialize
+       │ ───────────────────────────────▶ │
+       │  "What tools do you have?"       │   tools/list
+       │ ───────────────────────────────▶ │
+       │  "I have get_weather"            │
+       │ ◀─────────────────────────────── │
+       │  "Run get_weather for Delhi"     │   tools/call
+       │ ───────────────────────────────▶ │
+       │  "38°C, sunny"                   │
+       │ ◀─────────────────────────────── │
+```
 
-Important: the server has no LLM and no brain; it only has tools. The LLM lives on the client side, inside your agent.
+Every message is a small piece of JSON (the format is called JSON-RPC), for example:
 
-Lesson 1, Part 3: the 3 things a client asks
-
-When a client talks to a server, it always asks these 3 things, in this order:
-
-1. “Hello, can we talk?”
-Like a customer sitting down and the waiter saying “Welcome!” They agree to talk before anything else.
-→ The method name is initialize.
-
-2. “What tools do you have?”
-Like asking “Can I see the menu?”
-→ The method name is tools/list.
-The server answers with each tool’s name, description, and what inputs it needs.
-
-3. “Run this tool with these inputs.”
-Like ordering “One masala dosa, please.”
-→ The method name is tools/call.
-The server runs the tool and sends back the result.
-
-1. initialize   →  "Hello"            →  "Hello, I'm weather-tools"
-2. tools/list   →  "Menu please"      →  "get_weather (needs: city)"
-3. tools/call   →  "get_weather Delhi" →  "38°C, sunny"
-
-Each of those 3 asks is sent as a small piece of JSON text. Here’s the “menu please” message:
-
-json
+```json
 {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+```
 
-Only 3 parts:
+The `id` connects a question to its answer, like a token number at a bank counter.
 
-"jsonrpc": "2.0" is always the same. It just means “this message follows the standard format.” (Jargon: JSON-RPC is the name of this message format.)
-"method" is what you’re asking for: initialize, tools/list, or tools/call.
-"id" is a number for this question.
+## What is in this repo
 
-And the server’s answer:
+| Folder | What it shows |
+|---|---|
+| `by_hand/` | An MCP server written with **only plain Python** (no MCP library). It reads JSON from stdin and writes answers to stdout. Good for seeing what really happens. |
+| `with_library/` | The same server built with the official `mcp` library. Adds **resources** (data the client can read) and **prompts** (ready-made instructions). |
+| `with_http/` | A server that talks over **HTTP** instead of stdin/stdout. |
+| `with_community/` | A client that uses a server someone else made (`mcp-server-time`), downloaded and started with `uvx`. |
+| `agent/` | Real AI agents that use MCP tools: a plain OpenAI-style agent, a LangChain agent, and a team of 3 agents that each use their own server. |
 
-json
-{"jsonrpc": "2.0", "id": 2, "result": {"tools": [...]}}
+## Every file explained (read in this order)
 
-Look at the id: the question had 2, and the answer has 2. That’s how the client knows which answer belongs to which question, like a token number at a bank counter: you take token 2, and when “token 2” is called, you know it’s yours. (You saw this idea before as tool_call_id in Stage 0.)
+Each step builds on the one before it, so it is best to read them top to bottom.
 
+**Step 1: MCP by hand** (`by_hand/`)
 
-Lesson 1, Part 5: how the messages travel (stdio)
+| File | What it does |
+|---|---|
+| `by_hand/hand_server.py` | An MCP server made with plain Python only. It reads one JSON message per line from stdin, handles `initialize`, `tools/list` and `tools/call`, and writes the answer to stdout. If a message is broken, it sends back an error instead of crashing. |
+| `by_hand/test_client.py` | Starts the hand-made server, connects to it, lists its tools, and calls `get_weather` and `get_calculator`. This shows that a server made by hand works with the official client. |
 
-The messages are text. But how does text get from the client to the server?
+**Step 2: MCP with the official library** (`with_library/`)
 
-Example first: two people passing notes through two pipes.
+| File | What it does |
+|---|---|
+| `with_library/server.py` | The same server, but the `mcp` library does the JSON work for you. You just write normal functions and add `@mcp.tool()`. It also adds 2 **resources** (`weather://cities` and `weather://city/{name}`, which hold data the client can read) and 1 **prompt** (`weather_summary`, a ready-made instruction for the AI). |
+| `with_library/test_client.py` | Connects to that server and tries everything: lists and calls tools, lists and reads resources, and lists and gets prompts. |
 
-Pipe 1: the client pushes notes into the server.
-Pipe 2: the server pushes notes back out to the client.
+**Step 3: MCP over HTTP** (`with_http/`)
 
-Every program already has these pipes built in:
+| File | What it does |
+|---|---|
+| `with_http/http_server.py` | A weather server that runs as a web server at `http://localhost:8000/mcp` instead of using stdin/stdout. You start it yourself and it keeps running. |
+| `with_http/http_client.py` | Connects to that web address, lists the tools, and calls `get_weather`. |
 
-stdin (“standard input”): text going into a program. When you type in a terminal, you’re using stdin.
-stdout (“standard output”): text coming out. A normal print() goes here.
+**Step 4: Using someone else's server** (`with_community/`)
 
-(Jargon: using these two pipes to talk is called the stdio transport.)
+| File | What it does |
+|---|---|
+| `with_community/time_client.py` | Uses `mcp-server-time`, a server that other people wrote. `uvx` downloads and starts it. The client prints its tools and asks for the current time in India. You never see the server's code, and you don't need to. |
 
-CLIENT ──── stdin ────▶ SERVER      (questions go in)
-CLIENT ◀─── stdout ──── SERVER      (answers come out)
+**Step 5: AI agents that use MCP tools** (`agent/`)
 
-The rule: one message = one line. The server reads one line, answers with one line, and repeats.
+| File | What it does |
+|---|---|
+| `agent/mcp_to_openai.py` | Gets the tools from the server and converts them into the format an LLM API expects (OpenAI "function" format), then prints them. No LLM is called. This is the bridge between MCP and the AI. |
+| `agent/mcp_agent.py` | A full agent with no framework. The LLM sees the MCP tools and chooses one, the agent runs it on the server, and the result goes back to the LLM. This repeats until the LLM gives a final answer, up to 5 rounds. |
+| `agent/langchain_agent.py` | The same agent built with LangChain. Each MCP tool is wrapped as a LangChain `StructuredTool`, and LangChain runs the loop. |
+| `agent/multi_agent_mcp.py` | 3 agents work together. **WeatherAgent** uses only the weather server, and **TimeAgent** uses only the time server. **Writer** has no tools; it takes the other two agents' answers and writes a short message to a friend. |
 
-The danger: stdout is only for messages. If your server does a normal print("hello"), that line goes into the same pipe as the answers. The client expects JSON, gets hello, can’t understand it, and the connection breaks.
+**Project files**
 
-So where do debug messages go? Into a third pipe called stderr (“standard error”). The client ignores it, but you can still see it in the terminal:
+| File | What it does |
+|---|---|
+| `pyproject.toml` | Project settings and the list of libraries it needs (`mcp`, `openai`, `langchain`, `python-dotenv`). |
+| `uv.lock` | Exact library versions, so `uv sync` installs the same versions every time. Don't edit it by hand. |
+| `.python-version` | Tells uv to use Python 3.12. |
+| `.gitignore` | Files git should not save, like `.venv` and `.env` (your API key). |
+| `.env` | Your LLM settings and API key. You create it yourself (see Setup). It is not in git. |
+| `src/mcp_from_scratch/__init__.py` | Leftover from the project template (it only prints "Hello"). It is not used by any example. |
 
-python
-print("debug info", file=sys.stderr)   # safe: goes to stderr, not the message pipe
+The demo servers have two simple tools:
+
+- `get_weather(city)`: fake weather for Delhi and Mumbai.
+- `get_calculator(expression)`: does math, like `38 * 9 / 5 + 32`.
+
+## Setup
+
+You need **Python 3.12+** and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync
+```
+
+The scripts in `agent/` need an LLM. Make a file called `.env` in the project folder:
+
+```
+LLM_BASE_URL=https://your-provider/v1
+LLM_API_KEY=your-key-here
+LLM_MODEL=your-model-name
+```
+
+Any provider with an OpenAI-compatible API works. The `.env` file is ignored by git, so your key stays private.
+
+## How to run
+
+Run every command from the project root folder.
+
+**1. Hand-made server** (no library):
+
+```bash
+uv run by_hand/test_client.py
+```
+
+**2. Library server** (tools, resources and prompts):
+
+```bash
+uv run with_library/test_client.py
+```
+
+**3. HTTP server** (needs two terminals):
+
+```bash
+# terminal 1
+uv run with_http/http_server.py
+
+# terminal 2
+uv run with_http/http_client.py
+```
+
+**4. Someone else's server** (time zones):
+
+```bash
+uv run with_community/time_client.py
+```
+
+**5. AI agents** (need the `.env` file):
+
+```bash
+uv run agent/mcp_to_openai.py    # shows how MCP tools become LLM tool definitions (no LLM call)
+uv run agent/mcp_agent.py        # an agent that answers questions using the MCP tools
+uv run agent/langchain_agent.py  # the same idea, built with LangChain
+uv run agent/multi_agent_mcp.py  # 3 agents: weather, time, and a writer that combines their answers
+```
+
+You don't start the stdio servers yourself. Each client starts its server in the background.
+
+## Things worth knowing
+
+- **stdout is only for messages.** In a stdio server, a normal `print()` breaks the connection, because the client expects JSON. Print debug text to stderr instead:
+  ```python
+  print("debug info", file=sys.stderr)
+  ```
+- **One message = one line.** The server reads one line, answers with one line, and repeats.
+- **The calculator is for learning only.** It uses `eval()`, which is not safe for input from people you don't trust.
+
+## Useful links
+
+- [MCP documentation](https://modelcontextprotocol.io)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
